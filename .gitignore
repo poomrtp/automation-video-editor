@@ -4,34 +4,27 @@ __pycache__/
 *$py.class
 *.so
 .Python
-env/
 build/
-develop-eggs/
 dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
 *.egg-info/
-.installed.cfg
 *.egg
 .venv
 venv/
 ENV/
 
-# Temporary Video Frames and Prompts
+# Temporary files generated during analysis
 temp_frames/
+temp_audio.wav
+temp_audio_whisper.wav
 temp_prompt.txt
 
-# Analysis Results
+# Generated output files (re-created each run)
 analysis.json
-output_youtube.edl
-output_shorts.edl
+*.edl
+output/
+
+# Video source files (too large for git)
+vdo/
 
 # IDEs and editors
 .vscode/
@@ -43,6 +36,6 @@ output_shorts.edl
 .DS_Store
 Thumbs.db
 
-# Gemini/Claude CLI temp files
+# AI CLI local config
 .gemini/
 .claude/
