@@ -146,6 +146,187 @@ def analyze_audio_loudness(video_path: str, interval_sec: int = 30) -> list:
     return results
 
 
+# ── STEP 3b: Librosa deep audio scan (Task 9) ────────────────────────────────
+
+def analyze_audio_librosa(video_path: str, interval_sec: int = 20) -> list:
+    """
+    Detect voice shout peaks and onset bursts using librosa.
+    Returns list of {timestamp_sec, librosa_score} or [] if librosa not installed.
+    """
+    try:
+        import librosa
+        import numpy as np
+    except ImportError:
+        print("  (librosa not installed — skipping deep audio scan)")
+        return []
+
+    audio_path = Path("temp_audio_librosa.wav")
+    subprocess.run([
+        "ffmpeg", "-i", video_path,
+        "-vn", "-acodec", "pcm_s16le", "-ar", "22050", "-ac", "1",
+        str(audio_path), "-y", "-loglevel", "error"
+    ], capture_output=True, check=True)
+
+    y, sr = librosa.load(str(audio_path), sr=22050, mono=True)
+    audio_path.unlink(missing_ok=True)
+
+    window_samples = sr * interval_sec
+    raw = []
+    for i, start in enumerate(range(0, len(y), window_samples)):
+        seg = y[start:start + window_samples]
+        if len(seg) < window_samples // 2:
+            break
+        rms = float(np.sqrt(np.mean(seg ** 2)))
+        onset_env = librosa.onset.onset_strength(y=seg, sr=sr)
+        onset_peak = float(np.percentile(onset_env, 95))
+        centroid = float(np.mean(librosa.feature.spectral_centroid(y=seg, sr=sr)))
+        raw.append({"timestamp_sec": i * interval_sec, "rms": rms,
+                    "onset_peak": onset_peak, "centroid": centroid})
+
+    if not raw:
+        return []
+
+    def _norm(vals):
+        mn, mx = min(vals), max(vals)
+        r = mx - mn or 1.0
+        return [(v - mn) / r * 10 for v in vals]
+
+    rms_n    = _norm([r["rms"] for r in raw])
+    onset_n  = _norm([r["onset_peak"] for r in raw])
+    cent_n   = _norm([r["centroid"] for r in raw])
+
+    results = []
+    for i, r in enumerate(raw):
+        score = onset_n[i] * 0.50 + rms_n[i] * 0.35 + cent_n[i] * 0.15
+        results.append({"timestamp_sec": r["timestamp_sec"],
+                        "librosa_score": min(10, max(0, round(score)))})
+
+    print(f"Librosa audio scan done ({len(results)} windows)")
+    return results
+
+
+# ── STEP 3c: OpenCV vision scan for LoL UI events (Task 10) ──────────────────
+
+def scan_frames_opencv(frames: list) -> list:
+    """
+    Detect LoL kill feed entries and multi-kill banners per frame using OpenCV.
+    Returns list of {timestamp_sec, vision_score, detections} or [] if cv2 not installed.
+    """
+    try:
+        import cv2
+        import numpy as np
+    except ImportError:
+        print("  (opencv-python not installed — skipping vision scan)")
+        return []
+
+    results = []
+    for frame in frames:
+        ts = frame["timestamp_sec"]
+        img_bytes = base64.b64decode(frame["b64"])
+        img_arr = np.frombuffer(img_bytes, np.uint8)
+        img = cv2.imdecode(img_arr, cv2.IMREAD_COLOR)
+        if img is None:
+            results.append({"timestamp_sec": ts, "vision_score": 0, "detections": []})
+            continue
+
+        h, w = img.shape[:2]
+        detections = []
+        score = 0
+
+        # Kill feed — top-right (65-100% width, 0-30% height)
+        kf = img[0:int(h * 0.30), int(w * 0.65):]
+        kf_hsv = cv2.cvtColor(kf, cv2.COLOR_BGR2HSV)
+        area = kf.shape[0] * kf.shape[1] + 1
+
+        red_mask = cv2.bitwise_or(
+            cv2.inRange(kf_hsv, np.array([0, 100, 100]),   np.array([10, 255, 255])),
+            cv2.inRange(kf_hsv, np.array([160, 100, 100]), np.array([180, 255, 255])),
+        )
+        if np.sum(red_mask > 0) / area > 0.005:
+            detections.append("kill_feed_red")
+            score += 3
+
+        blue_mask = cv2.inRange(kf_hsv, np.array([100, 100, 100]), np.array([130, 255, 255]))
+        if np.sum(blue_mask > 0) / area > 0.005:
+            detections.append("kill_feed_blue")
+            score += 2
+
+        # Multi-kill banner — center-bottom (25-75% width, 60-85% height)
+        banner = img[int(h * 0.60):int(h * 0.85), int(w * 0.25):int(w * 0.75)]
+        banner_hsv = cv2.cvtColor(banner, cv2.COLOR_BGR2HSV)
+        banner_area = banner.shape[0] * banner.shape[1] + 1
+
+        gold_mask = cv2.inRange(banner_hsv, np.array([15, 150, 150]), np.array([35, 255, 255]))
+        if np.sum(gold_mask > 0) / banner_area > 0.01:
+            detections.append("multikill_banner")
+            score += 5
+
+        # Bright flash — center (30-70% width, 35-65% height)
+        center = img[int(h * 0.35):int(h * 0.65), int(w * 0.30):int(w * 0.70)]
+        gray = cv2.cvtColor(center, cv2.COLOR_BGR2GRAY)
+        if np.sum(gray > 220) / (center.shape[0] * center.shape[1] + 1) > 0.15:
+            detections.append("bright_flash")
+            score += 2
+
+        results.append({"timestamp_sec": ts, "vision_score": min(10, score),
+                        "detections": detections})
+
+    detected = sum(1 for r in results if r["detections"])
+    print(f"OpenCV vision scan done ({len(results)} frames, {detected} with detections)")
+    return results
+
+
+# ── STEP 3d: Combine all signals (Task 11) ────────────────────────────────────
+
+def normalize_and_combine_scores(
+    audio_data: list,
+    librosa_data: list,
+    vision_data: list,
+) -> list:
+    """
+    Merge RMS excitement (25%), librosa shout score (35%), and OpenCV vision score (40%)
+    into combined_score per segment. Weights shift gracefully when modules are missing.
+    """
+    lib_by_ts = {r["timestamp_sec"]: r for r in librosa_data}
+    vis_by_ts = {r["timestamp_sec"]: r for r in vision_data}
+
+    has_lib = bool(librosa_data)
+    has_vis = bool(vision_data)
+
+    combined = []
+    for r in audio_data:
+        ts = r["timestamp_sec"]
+        rms_score = r.get("excitement", 5)
+        lib_score = lib_by_ts.get(ts, {}).get("librosa_score", rms_score)
+        vis_score = vis_by_ts.get(ts, {}).get("vision_score", 0)
+        detections = vis_by_ts.get(ts, {}).get("detections", [])
+
+        if has_lib and has_vis:
+            combined_score = vis_score * 0.40 + lib_score * 0.35 + rms_score * 0.25
+        elif has_lib:
+            combined_score = lib_score * 0.60 + rms_score * 0.40
+        elif has_vis:
+            combined_score = vis_score * 0.60 + rms_score * 0.40
+        else:
+            combined_score = rms_score
+
+        # Pure voice peak: loud audio but zero visual confirmation and no librosa onset
+        # These are almost always "loud talking" not fight reactions — cap score at 5
+        is_pure_voice = (rms_score >= 7 and vis_score == 0 and lib_score < 7)
+        if is_pure_voice:
+            combined_score = min(combined_score, 5)
+
+        entry = dict(r)
+        entry["librosa_score"] = lib_score
+        entry["vision_score"] = vis_score
+        entry["vision_detections"] = detections
+        entry["combined_score"] = min(10, max(0, round(combined_score)))
+        entry["pure_voice_peak"] = is_pure_voice
+        combined.append(entry)
+
+    return combined
+
+
 def transcribe_audio_whisper(video_path: str, interval_sec: int = 30):
     """
     Optional: transcribe voice with Whisper (supports Thai).
@@ -196,34 +377,48 @@ def build_prompt(
     frames: list,
     sample_indices: set,
     duration: float,
-    audio_data: list,
+    combined_data: list,
     transcription: dict,
 ) -> str:
 
-    # Build audio lookup by timestamp
-    audio_by_ts = {r["timestamp_sec"]: r for r in audio_data}
+    data_by_ts = {r["timestamp_sec"]: r for r in combined_data}
 
     lines = []
     for i, f in enumerate(frames):
         ts = int(f["timestamp_sec"])
-        audio = audio_by_ts.get(ts, {})
-        exc = audio.get("excitement", "?")
-        db = audio.get("rms_db", "?")
-        voice_tag = ""
-        if exc != "?" and int(exc) >= 7:
-            voice_tag = "LOUD VOICE REACTION"
-        elif exc != "?" and int(exc) >= 5:
-            voice_tag = "active talking"
+        d = data_by_ts.get(ts, {})
+        exc       = d.get("excitement", "?")
+        db        = d.get("rms_db", "?")
+        lib       = d.get("librosa_score", "?")
+        vis       = d.get("vision_score", "?")
+        combined  = d.get("combined_score", exc)
+        detects   = d.get("vision_detections", [])
 
-        img_tag = "<-- IMAGE ATTACHED" if i in sample_indices else ""
+        pure_voice = d.get("pure_voice_peak", False)
+
+        tags = []
+        if pure_voice:
+            tags.append("PURE_VOICE_PEAK(max5)")
+        elif exc != "?" and int(exc) >= 7:
+            tags.append("LOUD VOICE")
+        if lib != "?" and int(lib) >= 7:
+            tags.append("SHOUT DETECTED")
+        if detects:
+            tags.append(f"VISION:[{','.join(detects)}]")
+        tag_str = "  " + "  ".join(tags) if tags else ""
+
+        img_tag = "  <-- IMAGE ATTACHED" if i in sample_indices else ""
         trans = transcription.get(i, "") if transcription else ""
         trans_part = f'  voice: "{trans}"' if trans else ""
 
         line = (
             f"  Frame {i+1}: video_time={ts}s"
-            f"  audio_excitement={exc}/10 ({db}dBFS)"
-            f"  {voice_tag}"
-            f"  {img_tag}"
+            f"  rms={exc}/10({db}dBFS)"
+            f"  librosa={lib}/10"
+            f"  vision={vis}/10"
+            f"  COMBINED={combined}/10"
+            f"{tag_str}"
+            f"{img_tag}"
             f"{trans_part}"
         )
         lines.append(line)
@@ -283,6 +478,19 @@ def build_prompt(
         "  - Prefer shorter and punchier over longer and padded.\n"
         "  - Pick max 5 Shorts, only from segments scoring 8+.\n"
         "\n"
+        "=== CUT QUALITY RULES (anti-patterns to avoid) ===\n"
+        "1. NEVER end a segment mid-fight. If the immediately following window scores >= 6\n"
+        "   and the fight reaction is still ongoing, extend end_sec to include it.\n"
+        "   Fights end when excitement drops to <= 4 AND voice has settled.\n"
+        "2. NEVER start a Short before the peak event. start_sec must be at the moment\n"
+        "   of impact — not the calm or build-up before it.\n"
+        "3. PURE_VOICE_PEAK(max5) frames are loud talking with zero visual event confirmed.\n"
+        "   Score them max 5/10. They CANNOT be Short candidates.\n"
+        "4. A valid Short requires at least one VISION:[...] signal within 60s of start_sec.\n"
+        "   Voice-only peaks (no kill feed, no multikill banner) do not qualify for Shorts.\n"
+        "5. Prefer to end every cut at a moment where excitement <= 3 (natural silence).\n"
+        "   Never cut mid-sentence or while someone is still reacting.\n"
+        "\n"
         "Return ONLY this JSON:\n"
         "{{\n"
         '  "segments": [\n'
@@ -311,7 +519,7 @@ def build_prompt(
 def analyze_with_claude_cli(
     frames: list,
     duration: float,
-    audio_data: list,
+    combined_data: list,
     transcription: dict,
 ) -> dict:
 
@@ -326,7 +534,7 @@ def analyze_with_claude_cli(
         sample_indices = set(sorted(sample_indices)[:max_images])
 
     sample = [frames[i] for i in sorted(sample_indices)]
-    prompt = build_prompt(frames, sample_indices, duration, audio_data, transcription)
+    prompt = build_prompt(frames, sample_indices, duration, combined_data, transcription)
 
     content = [{"type": "text", "text": prompt}]
     for f in sample:
@@ -393,6 +601,35 @@ def analyze_with_claude_cli(
 
 # ── STEP 6: Generate EDL files ───────────────────────────────────────────────
 
+def merge_adjacent_segments(segments: list, gap_sec: int = 40,
+                             cooldown_sec: int = 15, duration: float = 0) -> list:
+    """
+    Tasks 16+17: Merge kept segments whose gap <= gap_sec into one continuous block
+    (fixes mid-fight cuts), then extend each block's end by cooldown_sec so the
+    reaction has room to finish before the cut.
+    """
+    if not segments:
+        return segments
+
+    sorted_segs = sorted(segments, key=lambda x: x["start_sec"])
+    merged = [dict(sorted_segs[0])]
+
+    for seg in sorted_segs[1:]:
+        last = merged[-1]
+        gap = seg["start_sec"] - last["end_sec"]
+        if gap <= gap_sec:
+            last["end_sec"] = seg["end_sec"]
+            last["score"] = max(last.get("score", 0), seg.get("score", 0))
+            last["reason"] = last.get("reason", "") + f" | {seg.get('reason', '')}"
+        else:
+            merged.append(dict(seg))
+
+    cap = duration if duration > 0 else float("inf")
+    for seg in merged:
+        seg["end_sec"] = min(seg["end_sec"] + cooldown_sec, cap)
+
+    return merged
+
 def sec_to_tc(seconds: float, fps: int) -> str:
     h = int(seconds // 3600)
     m = int((seconds % 3600) // 60)
@@ -410,18 +647,34 @@ def slugify(text: str, max_len: int = 40) -> str:
     return text.strip("_")[:max_len].rstrip("_")
 
 
-def generate_youtube_edl(analysis: dict, video_filename: str, fps: int, min_score: int = 5) -> str:
+def generate_youtube_edl(analysis: dict, video_filename: str, fps: int, min_score: int = 5,
+                          prefix: str = "", combined_data: list = None,
+                          interval_sec: int = 30, duration: float = 0) -> str:
     all_segs = analysis.get("segments", [])
     good = [s for s in all_segs if s.get("score", 0) >= min_score]
     if not good:
         print("No segments above threshold -- using all")
         good = all_segs
 
+    # Task 16+17: merge adjacent segments and add cooldown buffer
+    good = merge_adjacent_segments(good, gap_sec=40, cooldown_sec=15, duration=duration)
+
+    # Task 18: build excitement lookup for natural cut point snapping
+    quiet_by_ts = {r["timestamp_sec"]: r.get("excitement", 5) for r in (combined_data or [])}
+
     lines = ["TITLE: Auto Cut - YouTube", "FCM: NON-DROP FRAME", ""]
     rec = 0.0
     for i, seg in enumerate(good, 1):
-        src_in = float(seg["start_sec"])
+        src_in  = float(seg["start_sec"])
         src_out = float(seg["end_sec"])
+
+        # Snap src_out to the quietest audio window within the next interval
+        if quiet_by_ts:
+            candidates = {ts: exc for ts, exc in quiet_by_ts.items()
+                          if src_out <= ts <= src_out + interval_sec}
+            if candidates:
+                src_out = float(min(candidates, key=candidates.get))
+
         rec_out = rec + (src_out - src_in)
         lines.append(
             f"{i:03d}  AX       AA/V  C        "
@@ -433,28 +686,44 @@ def generate_youtube_edl(analysis: dict, video_filename: str, fps: int, min_scor
         lines.append("")
         rec = rec_out
 
-    path = "output_youtube.edl"
+    path = f"{prefix}output_youtube.edl"
     Path(path).write_text("\n".join(lines), encoding="utf-8")
     print(f"YouTube EDL: {path}  ({rec/60:.1f} min, {len(good)} segments)")
     return path
 
 
-def generate_shorts_edl(analysis: dict, video_filename: str, fps: int) -> list:
+def generate_shorts_edl(analysis: dict, video_filename: str, fps: int,
+                         prefix: str = "", combined_data: list = None) -> list:
     highlights = sorted(
         analysis.get("shorts_highlights", []),
         key=lambda x: x["start_sec"]
     )
 
+    # Task 19: context window validation only when signals are available
+    has_signals = bool(combined_data) and any(
+        r.get("vision_score", 0) > 0 or r.get("librosa_score", 0) >= 7
+        for r in combined_data
+    )
+
     paths = []
     for i, seg in enumerate(highlights, 1):
-        src_in = float(seg["start_sec"])
+        src_in  = float(seg["start_sec"])
         src_out = float(seg["end_sec"])
-        dur = min(src_out - src_in, 60.0)
+        dur     = min(src_out - src_in, 60.0)
         src_out = src_in + dur
 
         raw_title = seg.get("title", "") or f"short_{i}"
-        filename = f"short_{slugify(raw_title)}.edl"
 
+        # Reject Short if no visual/onset event within ±60s
+        if has_signals:
+            window = [r for r in combined_data if abs(r["timestamp_sec"] - src_in) <= 60]
+            has_visual = any(r.get("vision_score", 0) >= 2 for r in window)
+            has_onset  = any(r.get("librosa_score", 0) >= 7 for r in window)
+            if not has_visual and not has_onset:
+                print(f"  SKIPPED {raw_title} — no visual/onset signal within 60s (pure voice peak)")
+                continue
+
+        filename = f"{prefix}short_{slugify(raw_title)}.edl"
         m_in, s_in = divmod(int(src_in), 60)
         m_out, s_out = divmod(int(src_out), 60)
 
@@ -474,6 +743,77 @@ def generate_shorts_edl(analysis: dict, video_filename: str, fps: int) -> list:
 
         Path(filename).write_text("\n".join(lines), encoding="utf-8")
         print(f"  {filename}  ({dur:.0f}s)  [{m_in}:{s_in:02d} - {m_out}:{s_out:02d} in video]")
+        paths.append(filename)
+
+    return paths
+
+
+# ── STEP 6c: Auto-detected shorts from combined peaks (Task 12) ──────────────
+
+def generate_autodetected_shorts_edl(
+    combined_data: list,
+    video_filename: str,
+    fps: int,
+    claude_shorts: list,
+    interval_sec: int = 20,
+    peak_threshold: int = 8,
+    prefix: str = "",
+) -> list:
+    """
+    Generate shorts EDLs directly from combined_score peaks, supplementing
+    Claude's suggestions. Skips any peak already covered by a Claude short.
+    """
+    peaks = [r for r in combined_data if r.get("combined_score", 0) >= peak_threshold]
+    if not peaks:
+        return []
+
+    # Group consecutive peaks into clusters (gap <= 2 intervals)
+    clusters: list[list] = []
+    current: list = []
+    for p in sorted(peaks, key=lambda x: x["timestamp_sec"]):
+        if not current or p["timestamp_sec"] - current[-1]["timestamp_sec"] <= interval_sec * 2:
+            current.append(p)
+        else:
+            clusters.append(current)
+            current = [p]
+    if current:
+        clusters.append(current)
+
+    claude_times = [s["start_sec"] for s in claude_shorts]
+    paths = []
+    auto_count = 0
+
+    for cluster in clusters:
+        peak = max(cluster, key=lambda x: x["combined_score"])
+        ts = peak["timestamp_sec"]
+
+        if any(abs(ts - ct) < 60 for ct in claude_times):
+            continue
+
+        src_in  = max(0.0, float(ts) - 10)
+        src_out = src_in + 60.0
+        detections = peak.get("vision_detections", [])
+        det_str = ", ".join(detections) if detections else "audio peak"
+
+        auto_count += 1
+        filename = f"{prefix}short_auto_peak_{auto_count}.edl"
+        m_in, s_in = divmod(int(src_in), 60)
+        m_out, s_out = divmod(int(src_out), 60)
+
+        lines = [
+            f"TITLE: auto_peak_{auto_count}",
+            "FCM: NON-DROP FRAME",
+            "",
+            (f"001  AX       AA/V  C        "
+             f"{sec_to_tc(src_in, fps)} {sec_to_tc(src_out, fps)} "
+             f"{sec_to_tc(0, fps)} {sec_to_tc(60, fps)}"),
+            f"* FROM CLIP NAME: {video_filename}",
+            f"* Auto-detected: combined={peak['combined_score']}/10  signals=[{det_str}]",
+            "",
+        ]
+        Path(filename).write_text("\n".join(lines), encoding="utf-8")
+        print(f"  {filename}  (60s)  [{m_in}:{s_in:02d}-{m_out}:{s_out:02d}]"
+              f"  combined={peak['combined_score']}/10  [{det_str}]")
         paths.append(filename)
 
     return paths
@@ -528,6 +868,9 @@ def print_summary(analysis: dict, audio_data: list):
 # ── MAIN ─────────────────────────────────────────────────────────────────────
 
 def main():
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
     parser = argparse.ArgumentParser(description="Auto-cut video with Claude CLI")
     parser.add_argument("video", help="Path to video file")
     parser.add_argument("--interval", type=int, default=30,
@@ -540,6 +883,8 @@ def main():
                         help="Generate YouTube long-form EDL")
     parser.add_argument("--shorts", action="store_true",
                         help="Generate YouTube Shorts highlights EDLs")
+    parser.add_argument("--prefix", type=str, default="",
+                        help="Prefix string for all output filenames (e.g. --prefix 2)")
     args = parser.parse_args()
 
     # Default to both if neither flag is explicitly set
@@ -563,26 +908,42 @@ def main():
 
     frames = extract_keyframes(video_path, interval_sec=args.interval)
 
-    audio_data = analyze_audio_loudness(video_path, interval_sec=args.interval)
+    audio_data    = analyze_audio_loudness(video_path, interval_sec=args.interval)
+    librosa_data  = analyze_audio_librosa(video_path, interval_sec=args.interval)
+    vision_data   = scan_frames_opencv(frames)
+    combined_data = normalize_and_combine_scores(audio_data, librosa_data, vision_data)
 
     transcription = None
     if not args.no_whisper:
         transcription = transcribe_audio_whisper(video_path, interval_sec=args.interval)
 
-    analysis = analyze_with_claude_cli(frames, duration, audio_data, transcription)
+    analysis = analyze_with_claude_cli(frames, duration, combined_data, transcription)
 
-    Path("analysis.json").write_text(
+    prefix = args.prefix
+    analysis_path = f"{prefix}analysis.json"
+    Path(analysis_path).write_text(
         json.dumps(analysis, ensure_ascii=False, indent=2), encoding="utf-8"
     )
-    print("Analysis saved: analysis.json")
+    print(f"Analysis saved: {analysis_path}")
 
     if do_youtube:
-        generate_youtube_edl(analysis, video_filename, fps, min_score=args.min_score)
+        generate_youtube_edl(analysis, video_filename, fps, min_score=args.min_score,
+                             prefix=prefix, combined_data=combined_data,
+                             interval_sec=args.interval, duration=duration)
 
     shorts_paths = []
     if do_shorts:
-        print("Shorts EDL files:")
-        shorts_paths = generate_shorts_edl(analysis, video_filename, fps)
+        print("Shorts EDL files (Claude):")
+        shorts_paths = generate_shorts_edl(analysis, video_filename, fps,
+                                           prefix=prefix, combined_data=combined_data)
+        print("Shorts EDL files (Auto-detected):")
+        auto_paths = generate_autodetected_shorts_edl(
+            combined_data, video_filename, fps,
+            claude_shorts=analysis.get("shorts_highlights", []),
+            interval_sec=args.interval,
+            prefix=prefix,
+        )
+        shorts_paths += auto_paths
 
     print_summary(analysis, audio_data)
 
