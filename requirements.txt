@@ -1,16 +1,19 @@
 # video-autocut dependencies
-# ติดตั้งด้วย: pip install -r requirements.txt
+# Install: pip install -r requirements.txt
 
-ffmpeg-python>=0.2.0
-
-# หมายเหตุ:
-# - ต้องติดตั้ง ffmpeg ใน system ด้วย (ไม่ใช่ Python package)
+# ── Required ─────────────────────────────────────────────────────────────────
+# None — the script uses Python stdlib only (json, wave, math, array, base64,
+# subprocess, pathlib, re, shutil, argparse).
+# FFmpeg must be installed separately as a system binary (not a Python package):
+#   Windows: winget install ffmpeg   OR   choco install ffmpeg
 #   macOS:   brew install ffmpeg
-#   Windows: choco install ffmpeg  หรือ  winget install ffmpeg
-#
-# - ต้องติดตั้ง Claude Code CLI:
-#   curl -fsSL https://claude.ai/install.sh | bash   (macOS/Linux)
-#   https://claude.ai/download                        (Windows)
-#
-# - login Claude CLI ด้วย Pro account:
-#   claude login
+#   Linux:   sudo apt install ffmpeg
+
+# ── Optional: voice transcription (Thai/English) ─────────────────────────────
+# Uncomment to enable Whisper transcription (improves highlight detection):
+# openai-whisper>=20231117
+
+# ── Claude CLI (not a pip package) ───────────────────────────────────────────
+# Install the Claude Code CLI and log in with a Pro account:
+#   Windows / macOS: https://claude.ai/download
+#   Then run: claude login
