@@ -2,16 +2,21 @@
 # Install: pip install -r requirements.txt
 
 # ── Required ─────────────────────────────────────────────────────────────────
-# None — the script uses Python stdlib only (json, wave, math, array, base64,
-# subprocess, pathlib, re, shutil, argparse).
+# Standard library utilities + core video/audio processing packages
+numpy>=1.20.0
+moviepy>=1.0.3
+opencv-python>=4.5.0
+
 # FFmpeg must be installed separately as a system binary (not a Python package):
 #   Windows: winget install ffmpeg   OR   choco install ffmpeg
 #   macOS:   brew install ffmpeg
 #   Linux:   sudo apt install ffmpeg
 
-# ── Optional: voice transcription (Thai/English) ─────────────────────────────
-# Uncomment to enable Whisper transcription (improves highlight detection):
-# openai-whisper>=20231117
+# ── Optional: advanced multimodal highlight detection ────────────────────────
+# Uncomment to enable AI voice transcription & deep audio analysis:
+openai-whisper>=20231117
+librosa>=0.10.0
+scipy>=1.10.0
 
 # ── Claude CLI (not a pip package) ───────────────────────────────────────────
 # Install the Claude Code CLI and log in with a Pro account:

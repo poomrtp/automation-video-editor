@@ -3,12 +3,14 @@
 This project automatically cuts and highlights gaming videos using the Claude CLI for AI analysis.
 
 ## Goals
+
 - Cut all silence and dead zones from YouTube long-form videos — keep only peaks and story bridges.
 - Generate retention-optimized YouTube Shorts (45–60s, hook in first 3 seconds).
 - Use Claude Pro subscription via CLI for visual + audio analysis.
 - Output EDL files importable directly into DaVinci Resolve.
 
 ## Technical Stack
+
 - **AI:** Claude Code CLI (Pro Subscription)
 - **Video Editor:** DaVinci Resolve
 - **Scripting:** Python 3 (stdlib only, no heavy dependencies)
@@ -18,6 +20,7 @@ This project automatically cuts and highlights gaming videos using the Claude CL
 - **Bridge:** EDL (Edit Decision List)
 
 ## Workflow
+
 1. **Frame Extraction:** `ffmpeg` extracts one frame every 20 seconds.
 2. **Audio Analysis:** RMS loudness computed per segment, normalized to 0–10 excitement scale.
 3. **AI Analysis:** Claude receives 10 sampled frames + all audio excitement data and returns scored segments, cuts, and Short highlights.
@@ -25,15 +28,17 @@ This project automatically cuts and highlights gaming videos using the Claude CL
 5. **Import:** DaVinci Resolve imports EDLs to create automated timelines.
 
 ## Scoring System
-| Score | Meaning | Action |
-|-------|---------|--------|
-| 0–2 | Silence, dead air, loading screen | Always cut |
-| 3–4 | Routine gameplay, no reactions | Cut |
-| 5–6 | Moderate activity or story bridge | Keep only if connecting two action moments |
-| 7–8 | Clear action + loud voice reaction | Keep |
-| 9–10 | Multi-kill, clutch, loudest peak | Always keep |
+
+| Score | Meaning                            | Action                                     |
+| ----- | ---------------------------------- | ------------------------------------------ |
+| 0–2   | Silence, dead air, loading screen  | Always cut                                 |
+| 3–4   | Routine gameplay, no reactions     | Cut                                        |
+| 5–6   | Moderate activity or story bridge  | Keep only if connecting two action moments |
+| 7–8   | Clear action + loud voice reaction | Keep                                       |
+| 9–10  | Multi-kill, clutch, loudest peak   | Always keep                                |
 
 ## Key Files
+
 - `analyze_video.py` — main script, single entry point.
 - `CLAUDE.md` — instructions for Claude Code CLI.
 - `README.md` — bilingual (TH/EN) setup and usage guide.
@@ -41,6 +46,15 @@ This project automatically cuts and highlights gaming videos using the Claude CL
 - `task.md` — per-session task tracking (created before each run, updated after).
 
 ## Recommended Command
-```
+
+```bash
+# Both formats (default)
+python analyze_video.py "vdo/your_video.mp4" --youtube --interval 20 --min-score 7
 python analyze_video.py "vdo/<file>.mp4" --interval 20 --min-score 7
+
+# YouTube only
+python analyze_video.py "vdo/<file>.mp4" --youtube
+
+# Shorts only
+python analyze_video.py "vdo/<file>.mp4" --shorts
 ```

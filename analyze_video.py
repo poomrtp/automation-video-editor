@@ -536,7 +536,18 @@ def main():
                         help="Cut segments below this score (default: 5)")
     parser.add_argument("--no-whisper", action="store_true",
                         help="Skip Whisper transcription even if installed")
+    parser.add_argument("--youtube", action="store_true",
+                        help="Generate YouTube long-form EDL")
+    parser.add_argument("--shorts", action="store_true",
+                        help="Generate YouTube Shorts highlights EDLs")
     args = parser.parse_args()
+
+    # Default to both if neither flag is explicitly set
+    do_youtube = args.youtube
+    do_shorts = args.shorts
+    if not do_youtube and not do_shorts:
+        do_youtube = True
+        do_shorts = True
 
     video_path = args.video
     if not Path(video_path).exists():
@@ -565,22 +576,29 @@ def main():
     )
     print("Analysis saved: analysis.json")
 
-    generate_youtube_edl(analysis, video_filename, fps, min_score=args.min_score)
+    if do_youtube:
+        generate_youtube_edl(analysis, video_filename, fps, min_score=args.min_score)
 
-    print("Shorts EDL files:")
-    shorts_paths = generate_shorts_edl(analysis, video_filename, fps)
+    shorts_paths = []
+    if do_shorts:
+        print("Shorts EDL files:")
+        shorts_paths = generate_shorts_edl(analysis, video_filename, fps)
 
     print_summary(analysis, audio_data)
 
     shutil.rmtree("temp_frames", ignore_errors=True)
 
-    print("\nNext steps in DaVinci Resolve:")
-    print("  1. File -> Import -> Media  -- add the original video")
-    print("  2. File -> Import -> Timeline  -- select output_youtube.edl")
-    print("  3. For each Short, import its EDL as a separate timeline:")
-    for p in shorts_paths:
-        print(f"       {p}")
-    print("  4. Export each Short timeline separately\n")
+    if do_youtube or do_shorts:
+        print("\nNext steps in DaVinci Resolve:")
+        print("  1. File -> Import -> Media  -- add the original video")
+        if do_youtube:
+            print("  2. File -> Import -> Timeline  -- select output_youtube.edl")
+        if do_shorts:
+            step_num = 3 if do_youtube else 2
+            print(f"  {step_num}. For each Short, import its EDL as a separate timeline:")
+            for p in shorts_paths:
+                print(f"       {p}")
+        print(f"  {4 if do_youtube and do_shorts else 3}. Export timelines as needed\n")
 
 
 if __name__ == "__main__":
