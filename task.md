@@ -1,4 +1,4 @@
-# Task List — LoL Game 2 Re-Edit
+# Task List — Video Editor Improvement Plan
 
 | #   | Task                                                                                                | Status |
 | --- | --------------------------------------------------------------------------------------------------- | ------ |
@@ -10,11 +10,28 @@
 | 6   | Update this file with final task status                                                             | done   |
 | 7   | Add `--youtube` and `--shorts` CLI flags for selective EDL generation                               | done   |
 | 8   | Run `pip install -r requirements.txt` to install OpenCV, MoviePy, and NumPy                         | done   |
-| 9   | Implement Librosa Audio Scan function to detect shouting/loud peak moments                          | todo   |
-| 10  | Implement OpenCV UI Scan to detect LoL Kill Feed / Multi-kill popups                                | todo   |
-| 11  | Create `normalize_and_combine_scores()` logic to merge Text, Audio, and Vision data                 | todo   |
-| 12  | Update EDL generation script to trigger shorts based on the new combined peak scores                | todo   |
-| 13  | Test the complete multimodal pipeline on `vdo/LoL game 2.mp4`                                       | todo   |
+| 9   | Implement Librosa Audio Scan function to detect shouting/loud peak moments                          | done   |
+| 10  | Implement OpenCV UI Scan to detect LoL Kill Feed / Multi-kill popups                                | done   |
+| 11  | Create `normalize_and_combine_scores()` logic to merge Text, Audio, and Vision data                 | done   |
+| 12  | Update EDL generation script to trigger shorts based on the new combined peak scores                | done   |
+| 13  | Test the complete multimodal pipeline on `vdo/LoL game 2.mp4`                                       | blocked — video file missing from vdo/ |
+
+---
+
+## Phase 2 — Cut Quality Fixes (Bad Cuts & False Positives)
+
+> **Goal:** Fix two problems — (1) cuts that happen mid-fight before the reaction finishes, (2) mic spikes with no visual context being included as highlights.
+
+| #  | Task | Problem It Fixes | Effort | Status |
+|----|------|-----------------|--------|--------|
+| 14 | `pip install opencv-python librosa` — enable visual validation | Both problems | 5 min | done |
+| 15 | Add `pure_voice_peak` flag in `normalize_and_combine_scores()` — cap score at 5 if voice peak has zero vision signal | Mic spike false positives | 30 min | done |
+| 16 | Add `merge_adjacent_segments()` — merge kept segments within 40s gap into one continuous clip | Cuts mid-fight | 1 hr | done |
+| 17 | Add 15s cooldown buffer to every kept segment so reaction has room to finish before cut | Cuts mid-fight | 30 min | done |
+| 18 | Add natural cut point scan in `generate_youtube_edl()` — find quietest audio sample within 8s of boundary and cut there | Cuts mid-sentence | 30 min | done |
+| 19 | Add context window validation in `generate_shorts_edl()` — reject Short if no kill/onset event within ±60s | Mic spike false positives | 45 min | done |
+| 20 | Update `build_prompt()` anti-patterns — tell Claude never to end mid-fight, never start Short without visual payoff, cap pure voice peaks at 5 | Both problems | 20 min | done |
+| 21 | End-to-end test on `vdo/2026-05-16 14-02-28.mp4` and verify no mid-fight cuts or false-positive Shorts in output | Verification | 30 min | done |
 
 ---
 
