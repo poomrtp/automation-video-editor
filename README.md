@@ -1,121 +1,163 @@
+# 🎬 Video Auto-Cut with Claude CLI + DaVinci Resolve
 # 🎬 Video Auto-Cut ด้วย Claude CLI + DaVinci Resolve
 
-ใช้ Claude Pro subscription (ไม่ต้องใช้ API key) วิเคราะห์ video แล้ว
-generate EDL file สำหรับ import เข้า DaVinci Resolve โดยตรง
+Analyze gaming videos with Claude Pro, automatically cut silences and dead zones,
+and generate EDL files ready to import into DaVinci Resolve.
+
+ใช้ Claude Pro วิเคราะห์ video เกม ตัดความเงียบและช่วงน่าเบื่อออกอัตโนมัติ
+แล้ว generate EDL file สำหรับ import เข้า DaVinci Resolve โดยตรง
 
 ---
 
-## 📦 สิ่งที่ต้องติดตั้งก่อน (ทำครั้งเดียว)
+## 📦 Requirements / สิ่งที่ต้องติดตั้งก่อน
 
-### 1. ffmpeg
+### 1. FFmpeg
+
 ```bash
 # macOS
 brew install ffmpeg
 
 # Windows (PowerShell as Admin)
-choco install ffmpeg
-# หรือดาวน์โหลดจาก https://ffmpeg.org/download.html
+winget install ffmpeg
+# or / หรือ: choco install ffmpeg
 ```
 
 ### 2. Python 3.8+
-ตรวจสอบด้วย: `python --version`
-ถ้าไม่มี ดาวน์โหลดจาก https://python.org
 
-### 3. Python dependencies
+```bash
+python --version   # verify / ตรวจสอบ
+# Download from https://python.org if missing
+```
+
+### 3. Python dependencies / ติดตั้ง dependencies
+
 ```bash
 pip install -r requirements.txt
+# No required pip packages — all stdlib.
+# ไม่มี package บังคับ ใช้ stdlib ทั้งหมด
+```
+
+Optional — voice transcription (Thai/English):
+```bash
+pip install openai-whisper
 ```
 
 ### 4. Claude Code CLI
+
 ```bash
 # macOS / Linux
 curl -fsSL https://claude.ai/install.sh | bash
 
-# Windows — ดาวน์โหลด installer จาก
+# Windows — download installer from:
 # https://claude.ai/download
 ```
 
-### 5. Login ด้วย Claude Pro account
+### 5. Login with Claude Pro account / Login ด้วย Claude Pro account
+
 ```bash
 claude login
+# Opens browser → log in with your claude.ai account
 # เปิด browser → login ด้วย account เดียวกับ claude.ai
 ```
 
-ตรวจสอบว่า login สำเร็จ:
+Verify login / ตรวจสอบว่า login สำเร็จ:
 ```bash
 claude --version
-claude -p "hello"   # ควรได้รับ response กลับมา
+claude -p "hello"
 ```
 
 ---
 
-## 🚀 วิธีใช้งาน
+## 🚀 Usage / วิธีใช้งาน
 
-### รูปแบบพื้นฐาน
+### Recommended command / คำสั่งแนะนำ
+
 ```bash
-python analyze_video.py <path-to-video>
+python analyze_video.py "vdo/<filename>.mp4" --interval 20 --min-score 7
 ```
 
-### ตัวอย่าง
+### All options / ตัวเลือกทั้งหมด
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--interval <sec>` | `30` | Frame extraction frequency. `20` recommended for accuracy. |
+| `--min-score <0-10>` | `5` | Keep segments at or above this score. `7` = peaks only. |
+| `--no-whisper` | off | Skip Whisper transcription even if installed. |
+
+### Examples / ตัวอย่าง
+
 ```bash
-# วิเคราะห์ video ธรรมดา
+# Standard run
 python analyze_video.py my_recording.mp4
 
-# ดึง frame ถี่ขึ้น (ทุก 20 วินาที) เพื่อความแม่นยำ
-python analyze_video.py my_recording.mp4 --interval 20
+# Recommended — peaks only, higher accuracy
+python analyze_video.py "vdo/LoL game 2.mp4" --interval 20 --min-score 7
 
-# เข้มงวดขึ้น — ตัดออกถ้า score < 6
-python analyze_video.py my_recording.mp4 --min-score 6
-
-# ใช้ทุก option รวมกัน
+# Include moderate story bridges (score 6+)
 python analyze_video.py my_recording.mp4 --interval 20 --min-score 6
 ```
 
-### ผลลัพธ์ที่ได้
+### Output files / ผลลัพธ์ที่ได้
+
 ```
-video_autocut/
-├── output_youtube.edl   ← import เข้า DaVinci สำหรับ YouTube
-├── output_shorts.edl    ← import เข้า DaVinci สำหรับ Shorts
-└── analysis.json        ← ผล analysis ฉบับเต็ม (ดูรายละเอียดได้)
+automation-video-editor/
+├── output_youtube.edl        ← YouTube long-form timeline
+├── short_<title>.edl         ← one file per YouTube Short (up to 5)
+└── analysis.json             ← full Claude JSON response
 ```
 
 ---
 
-## 🎬 ขั้นตอนใน DaVinci Resolve
+## 🎬 DaVinci Resolve Steps / ขั้นตอนใน DaVinci Resolve
 
-1. **Import video ต้นฉบับ**
-   File → Import → Media → เลือก video file
+1. **Import source video / Import video ต้นฉบับ**
+   `File → Import → Media` → select your video file
 
-2. **Import YouTube timeline**
-   File → Import → Timeline → เลือก `output_youtube.edl`
-   → DaVinci จะถามว่าจะ link กับ clip ไหน → เลือก video ที่ import ไว้
+2. **Import YouTube timeline / Import YouTube timeline**
+   `File → Import → Timeline` → select `output_youtube.edl`
+   DaVinci will ask which clip to link → select the imported video
 
-3. **Import Shorts timeline** (แยก project หรือแยก timeline)
-   File → Import → Timeline → เลือก `output_shorts.edl`
+3. **Import each Short as a separate timeline / Import Shorts แยก timeline**
+   `File → Import → Timeline` → select each `short_<title>.edl`
 
-4. **ตรวจและปรับ** ใน timeline ตามต้องการ
+4. **Review and trim / ตรวจและปรับ** in the timeline as needed
 
-5. **Export**
-   - YouTube: Deliver → YouTube preset → 1080p/4K
-   - Shorts: Deliver → เลือก Custom → ตั้ง resolution เป็น 1080x1920
+5. **Export / Export**
+   - YouTube long: `Deliver → YouTube 1080p/4K preset`
+   - Shorts: `Deliver → Custom → Resolution: 1080 × 1920`
 
 ---
 
-## ⚠️ หมายเหตุ
+## ✂️ Scoring System / ระบบ Score
 
-- **Claude CLI ใช้ quota เดียวกันกับ claude.ai** — ถ้าใช้ Pro plan จะมี limit
-  ถ้า quota หมด ให้รอ reset หรือ upgrade เป็น Max
-- **ไฟล์ EDL ใช้ fps = 25** — ถ้า video เป็น 30fps ให้แก้ค่า `fps` ใน `sec_to_tc()` ใน script
-- **ความแม่นยำขึ้นอยู่กับเนื้อหา** — video ที่มี visual ชัดเจนจะได้ผลดีกว่า talking head
+| Score | Action | Meaning |
+|-------|--------|---------|
+| 0–2 | Always cut | Silence, dead air, loading screen |
+| 3–4 | Cut | Routine gameplay, no voice reactions |
+| 5–6 | Story bridge only | Keep only if connecting two action moments |
+| 7–8 | Keep | Clear action or loud voice reaction |
+| 9–10 | Always keep | Multi-kill, clutch, loudest peak |
+
+---
+
+## ⚠️ Notes / หมายเหตุ
+
+- **Claude CLI shares quota with claude.ai** — Pro plan has a usage limit.
+  If quota runs out, wait for reset or upgrade to Max.
+  **Claude CLI ใช้ quota เดียวกันกับ claude.ai** — ถ้า quota หมดให้รอ reset หรือ upgrade เป็น Max
+- **FPS is auto-detected** — no manual adjustment needed.
+  **FPS ถูก detect อัตโนมัติ** — ไม่ต้องแก้ไขเอง
+- **Accuracy depends on content** — videos with clear visual events and loud voice reactions produce the best results.
+  **ความแม่นยำขึ้นอยู่กับเนื้อหา** — video ที่มี voice reaction ชัดเจนจะได้ผลดีที่สุด
 
 ---
 
 ## 🔧 Troubleshooting
 
-| ปัญหา | วิธีแก้ |
+| Problem / ปัญหา | Solution / วิธีแก้ |
 |---|---|
-| `claude: command not found` | เปิด terminal ใหม่ หรือ re-install CLI |
-| `ffprobe: command not found` | ติดตั้ง ffmpeg ใหม่ และ restart terminal |
-| Claude ตอบไม่เป็น JSON | รัน script อีกครั้ง (Claude อาจตอบผิด format) |
-| EDL import ไม่เจอ clip | ตรวจให้แน่ใจว่า video อยู่ใน Media Pool ก่อน import EDL |
-| quota หมด | รอ reset หรือรัน `claude login` ตรวจสอบ account |
+| `claude: command not found` | Reopen terminal or reinstall CLI / เปิด terminal ใหม่ หรือ re-install |
+| `ffprobe: command not found` | Reinstall FFmpeg and restart terminal / ติดตั้ง ffmpeg ใหม่แล้ว restart |
+| Claude returns non-JSON | Re-run the script (occasional format error) / รัน script อีกครั้ง |
+| EDL can't find clip in Resolve | Ensure video is in Media Pool before importing EDL / ตรวจสอบว่า video อยู่ใน Media Pool ก่อน |
+| Quota exceeded / quota หมด | Wait for reset or run `claude login` to check account |
